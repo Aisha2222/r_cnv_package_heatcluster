@@ -34,14 +34,7 @@ final_bed_25_samples_v05<- final_bed_25_samples_v04 %>%
   mutate(mean = ifelse(mean == -Inf, -2, mean)) 
 table(final_bed_25_samples_v05[,7]) #to confirm if my conversion to -2 truly worked 
 
+
 #then now I can make my plotheatmap function 
 plotHeatmap(as.data.frame(final_bed_25_samples_v05), upper.lim=c(1,5), lower.lim = c(-2,-1)) #the limit that you choose for the plotheatmap really depends on the on the range of values for copy numbers where your sample lie
 plotHeatmap(as.data.frame(final_bed_25_samples_v05), upper.lim= -0, lower.lim = 5)
-
-
-
-
-
-
-
-
