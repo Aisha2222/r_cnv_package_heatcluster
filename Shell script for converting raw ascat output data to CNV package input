@@ -1,0 +1,87 @@
+I downloaded the human genome 19 file with chromosome 1-22, X,Y and the equivalent ammount of nucleotides in each chromosome
+found this on github and rearranged it on excel 
+#I then picked the bin size to be about 50kb 
+I used bedtools makewindows to create the 50kb bin size on the raw_h19genome file, bedtools makewindows -g h19_genome.bed -w 50000 >h19_genome_reseg
+Because an arm colum is also needed in the dataframe that will be  input for CNV package on R, I had to include the arm column in my downloaded file by intersecting the h19_genome_reseg file with the cytoband file Ganesh found online with chromosomal arm
+After downloading the cytoband file, I sorted based on chrom column in the order 1,2,3... using sort -V
+I then  cut out the 4 columns(chrom, start_seq, end_seq, arm) of interest using the cut -f 1,2,3,4 cytoBand_armLevel_v02.txt >cytoBand_armLevel_v03.txt
+next, i deleted the chr in front of chromosome number in each row of the chrom column using sed 's/chr//' cytoBand_armLevel_v03.txt > cytoBand_armLevel_v04.txt
+I then moved to bedtools intersect of my modified cytoband file with the human_genome_reseg file to have the chrom arm reflected in the human_genome_reseg file using bedtools intersect -a h19_genome_reseg -b cytoBand_armLevel_v04.txt -loj |head
+it is immportant that you use -loj because you need the other columns present in B file (cytoband file) to be placed at the side of a file(human_genome_reseg file) as well
+after seeing from the head of the data frame that the data looked as i expected, i piped in the cut function to remove the columns that I am interest in and then finally saved it into in a new file using  bedtools intersect -a h19_genome_reseg -b cytoBand_armLevel_v04.txt -loj |cut -f1,2,3,7 > h19_genome_reseg_arms_v02.txt
+i then created a new folder in which all the ASCAT caveman.csv output files were kept, these were 25 different samples. I called this folder raw_ascat_data. I plan on merging the data from each ASCAT sample file into one folder and creating a new column simulatenously which tells which sample each row in the new combined dataframe is coming from. To do this, I modified Ganesh's script replacing "ascat"(which is the name of the folder that he created with all the ASCAT output files ) with raw_ascat_data(the name of the folder that I had just created with all the ASCAT files). i named this new script ascat_postprocessing_vo2.sh
+I then ran the script which named the newly formed meged file  AllSamples_ASCAT. The code used for this was sh ascat_postprocessing_vo2.sh 
+the AllSamples_ASCAT contains data from each of the files in the raw_Ascat file with a new column added which has the sample name (for example LP2000104-DNA_A01) reflecting which ascat output file the data in that row came from. In the all_Samp_Ascat file, the function also removes the heading from all the files leaving only the first file .
+just to check that everything is in order, I used the wc -l raw_ascat_data/* function to see the amount of rows I have before merging and then used the wc -l AllSamples_ASCAT function to see how many rows I had after merging , comparing between the numbers.
+I removed the headings for colunmns manually from the AllSamples_ASCAT file just as i did for the h19_genome_reseg_arms_v02.txt file because bedtools doesnt like that 
+i then ran bedtools intersect with my bins (h19_genome_reseg_arms_v02.txt) to find overlapping segment using the command bedtools intersect -a h19_genome_reseg_arms_v02.txt -b AllSamples_ASCAT -loj>intersected_allsamp_v03.txt
+Sometimes my bins(segaments) & ASCAT bins can be repeated in the sample but these rows will 2 different copy numbers, to correct for this, i had to run the -f 0.5 function because that reports the max segment overlap for the ASCAT CN data, so after running this, only one segment will be picked usually the  row with the highest CN. Syntax:intersected_allsamp_v03.txt - f0.5
+next i then run inter
+I then removed the rows of interest (chrom, start_seq(my bin), end_seq(my bin), arm, CN and sampleID) using the syntax  cut -f 1,2,3,4,8,9 intersected_allsamp_v02.txt > intersected_allsamp_v04.txt 
+Now, my data is ready to be fed into R but first I have to remove the heading of the v04 naming it intersected_allsamp_v05.txt 
+
+Modification of linux file otput on R- The plot_heatmap_v03 script is summarized below 
+
+ibrary(tidyverse)
+library(copynumber)
+final_bed_25_samples <- read_tsv("intersected_allsamp_v05.txt", col_types = "ciicdc", na =".") #read in dataframe from intersection and the specify that chrom is character using col_types to prevent X and Y from turning to NA
+final_bed_25_samples$n.probes=10 #add in the column for probes
+final_bed_25_samples_v02 <- final_bed_25_samples [, c(6,1,4,2,3,7,5)] #rearrange the columns to fit the copy number data frame format 
+table(final_bed_25_samples_v02[,1]) #to check if i have NA in the sample id column
+dist_chrom <- distinct(final_bed_25_samples_v02, sampleID)
+
+#####at this point I have seen that there are some rows without sample name, so I am going to use bedtools to cut thos rows of using the sed command, I will export the data first with write_tsv####
+
+write_tsv(final_bed_25_samples_v02, "preprocessed_final_final_bed_25_samples_v02.txt")
+
+#On my command line, I used the command grep -v '^NA' preprocessed_final_final_bed_25_samples_v02.txt > linux_processed_final_final_bed_25_samples_v02.txt to remove the columns with NA sample ID because I know that wont be tolerated by the plot_heatmap function
+#Now i am reading in the modified final_bed_25_samples_v02 which i named linux_processed_final_final_bed_25_samples_v02.txt 
+
+final_bed_25_samples_v03 <- read_tsv("newest folder for processed data for final analysis/linux_processed_final_final_bed_25_samples_v02.txt", col_types = "ccciidd")
+
+#it is important that you specify coltypes otherwise R will return X and Y as NA
+
+####data quality check before moving on####
+dist_sampleID<- distinct(final_bed_25_samples_v03, sampleID) #just 25 samples yay!
+dist_chrom<- distinct(final_bed_25_samples_v03, chrom) 
+dist_mean<-  distinct(final_bed_25_samples_v03, mean) 
+
+#now that we know are sure that the data looks good, we can proceed to adjusting for ploidy and long 2 tranformation , we assumed that ploidy =2 in this case since we arent really keen about knowing the ploidy number in this exercise
+
+final_bed_25_samples_v04 <- final_bed_25_samples_v03 
+final_bed_25_samples_v04$mean <- log2(final_bed_25_samples_v04$mean/2)
+table(final_bed_25_samples_v04[,7]) #this table option shows us all the distinct values in the colunmn 7 and how many rows have those disticnt volues or in our case how many samples bare the distinct modified copy number values 
+
+#we have spotted a problem, we werent able to run the plot_heatmap() function because of the -inf numbers. The function was designed for negative values indicating loss and therfore assigned the blue number whereas positive values indicating the gain and assigned to the red color on the heatmap.The error from R read : upper.lim must be positive and lower.lim must be negative so i had to convert all -inf values to -2 because I am not interested in that part 
+#To do this, we use mutate and ifelse functions 
+
+final_bed_25_samples_v05 <- final_bed_25_samples_v04 %>% 
+  mutate(mean = ifelse(mean == -Inf, -2, mean)) 
+table(final_bed_25_samples_v05[,7]) 
+
+#now we can decide limit in which the plotheatmap will be graphed, the limit that you decide really depends on the rang of CN where your samples lie , for example in this case anything lower than 0 will be assigned blue(not so interesting to my data anlysis) and anything above the ipper l
+
+plotHeatmap(as.data.frame (final_bed_25_samples_v05), upper.lim=5, lower.lim = -1)
+
+##################################################################################################################
+#it is important to note that the matrix that you are inserting into the plotheatmap() has to be a dataframe otherwise you get errors . I performed reanalysis of the data after getting help from Karol, these are written below in full details. 
+
+Karol's codes for converting tibble to data frame to solve the holes in columns error problems 
+1. plotHeatmap(as.data.frame(newer_bed_25_samples), upper.lim=10)
+but then he said something about needing to adjust and converting for ploidy using Log2 (mean(copynumber)/ploidy)
+		For this in particular, we assume 2 as the ploidy number for all samples
+		he created a new object where the data will be manipulated on R, written below
+		tmp1 <- newer_bed_25_samples
+		 tmp1$mean <- log2(tmp1$mean/2) 
+He then checked to see the amount of rows having each of the newly adjusted copy number. He did this using  the table function.
+		table(tmp1[,7]) , we found that the lowest adjusted CN value was -inf (which is essentially when CN =0, log2(10/2)), around  3942 rows had this. Highest value on the other hand was 2.3 (which is essentially when CN =5), 5517 rows 
+However we werent able to run the plot_heatmap() function because of the -inf numbers. The function was designed for negative values indicating loss and therfore assigned the blue number whereas positive values indicating the gain and assigned to the red color on the heatmap.The error from R read : upper.lim must be positive and lower.lim must be negative
+so i had to convert all -inf values to -2 because I am not interested in that part.
+ I set the upper limit for 5 and lower limit for -1 
+ i had to reanalyze the data removing the ifelse any CN >10 should be set at 10
+ so i used the CN values  directly for the heatmap plot.  More detailed explanation of this is in the R_script plot_heatmap_v03 script in which I have copied and pasted after Advise from Ganesh
+
+Advise from Ganesh on limits 
+1. set the lower and upper limit to -2, and 1 respectively 
+2. count all the CN's lesser than -2 and greater than 1 after log tranformation and then reorder the samples based on these numbers in descending order (samples with highest CN come first and samples with lowest CN come after)
+3.then rerun this analysis below on the new sorted data. You sort the data before merging so you have to figure out a way that you are able to arrange the files in the right order in raw_ascat_data folder before merging, 
